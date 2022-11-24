@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const session = require("express-session");
+const bcrypt = require("bcryptjs");
 const passport = require("passport");
 const LocalStrategy = require("passport-local").Strategy;
 const mongoose = require("mongoose");
@@ -30,20 +31,21 @@ passport.use(
       (err, user) => {
         if (err) return done(err);
         if (!user) {
-          console.error(`Invalid username: ${user} not found!`);
+          console.error(`Invalid username: ${username} not found!`);
           return done(null, false, {
             message: "Incorrect username or password",
           });
         }
-        if (user.password !== password) {
-          console.error(
-            `Invalid password: '${user.password}' on file did not match '${password}' given`
-          );
-          return done(null, false, {
-            message: "Incorrect username or password",
-          });
-        }
-        return done(null, user);
+
+        bcrypt.compare(password, user.password, (err, res) => {
+          if (res) {
+            console.log(`${user} supplied correct password '${password}'`);
+            return done(null, user);
+          }
+
+          console.error(`Invalid password: '${user.password}'`);
+          return done(null, false, { message: "Incorrect password" });
+        });
       }
     );
   })
@@ -72,7 +74,9 @@ app.use(passport.session());
 app.use(express.urlencoded({ extended: false }));
 
 app.get("/", (req, res) => {
-  res.render("index", { user: req.user });
+  res.render("index", {
+    user: req.user,
+  });
 });
 
 app.get("/sign-up", (req, res) => res.render("sign-up-form"));
@@ -81,11 +85,11 @@ app.post(
   "/sign-up",
   [
     body("username")
+      .isAlpha()
+      .withMessage("Please specify a valid username")
       .trim()
       .isLength({ min: 4, max: 16 })
       .withMessage("Username must be between 4 and 16 characters")
-      .isAlpha()
-      .withMessage("Please specify a valid username")
       .escape(),
     body("password")
       .isLength({ min: 8 })
@@ -101,13 +105,17 @@ app.post(
       return;
     }
 
-    const user = new User({
-      username: req.body.username,
-      password: req.body.password,
-    }).save((err) => {
+    bcrypt.hash(req.body.password, 10, (err, hashedPassword) => {
       if (err) return next(err);
-      res.redirect("/");
-    });
+      const user = new User({
+        username: req.body.username,
+        password: hashedPassword,
+        // password: req.body.password,
+      }).save((err) => {
+        if (err) return next(err);
+        res.redirect("/");
+      });
+    }); // end bcrypt
   }
 );
 
